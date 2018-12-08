@@ -278,6 +278,16 @@ static void crk_remove_salt(struct db_salt *salt)
 	dyna_salt_remove(salt->salt);
 }
 
+#define BLOB_BINARY(b) ((crk_params->flags & FMT_BLOB) ?	\
+                        (((fmt_data*)(b))->blob) : (b))
+
+#define BLOB_SIZE(b) ((crk_params->flags & FMT_BLOB) ?	  \
+                      (((fmt_data*)(b))->size) : (crk_params->binary_size))
+
+#define BLOB_FREE(b) do { if ((crk_params->flags & FMT_BLOB) &&	  \
+                              (((fmt_data*)(b))->flags & FMT_DATA_ALLOC)) \
+			MEM_FREE(((fmt_data*)(b))->blob); } while (0)
+
 /*
  * Updates the database after a password has been cracked.
  */
@@ -303,6 +313,7 @@ static void crk_remove_hash(struct db_salt *salt, struct db_password *pw)
 		while (*current != pw)
 			current = &(*current)->next;
 		*current = pw->next;
+		BLOB_FREE(pw->binary);
 		pw->binary = NULL;
 		return;
 	}
@@ -347,8 +358,10 @@ static void crk_remove_hash(struct db_salt *salt, struct db_password *pw)
  * Or, if FMT_REMOVE, the format explicitly intends to traverse the list
  * during cracking, and will remove entries at that point.
  */
-	if (crk_guesses || (crk_params->flags & FMT_REMOVE))
+	if (crk_guesses || (crk_params->flags & FMT_REMOVE)) {
+		BLOB_FREE(pw->binary);
 		pw->binary = NULL;
+	}
 }
 
 /* Negative index is not counted/reported (got it from pot sync) */
@@ -361,7 +374,8 @@ static int crk_process_guess(struct db_salt *salt, struct db_password *pw,
 	int dupe;
 	char *key, *utf8key, *repkey, *replogin, *repuid;
 
-	if (index >= 0 && index < crk_params->max_keys_per_crypt) {
+	if (index >= 0 && index < crk_params->max_keys_per_crypt &&
+		!(crk_params->flags & FMT_BLOB)) {
 		dupe = crk_timestamps[index] == status.crypts;
 		crk_timestamps[index] = status.crypts;
 	} else
@@ -410,7 +424,7 @@ static int crk_process_guess(struct db_salt *salt, struct db_password *pw,
 	}
 
 	// Ok, FIX the salt  ONLY if -regen-lost-salts=X was used.
-	if (options.regen_lost_salts && (crk_db->format->params.flags & FMT_DYNAMIC) == FMT_DYNAMIC)
+	if (options.regen_lost_salts && (crk_params->flags & FMT_DYNAMIC) == FMT_DYNAMIC)
 		crk_guess_fixup_salt(pw->source, *(char**)(salt->salt));
 
 	/* If we got this crack from a pot sync, don't report or count */
@@ -492,7 +506,6 @@ static int crk_remove_pot_entry(char *ciphertext)
 	struct db_password *pw;
 	char argcopy[LINE_BUFFER_SIZE];
 	void *pot_salt;
-	char *binary = crk_methods.binary(ciphertext);
 
 	/*
 	 * If the pot entry is truncated from a huge ciphertext, we have
@@ -567,8 +580,10 @@ static int crk_remove_pot_entry(char *ciphertext)
 	}
 	else {
 		int hash;
+		char *binary = crk_methods.binary(ciphertext);
 
 		hash = crk_methods.binary_hash[salt->hash_size](binary);
+		BLOB_FREE(binary);
 		if (!(salt->bitmap[hash / (sizeof(*salt->bitmap) * 8)] &
 		      (1U << (hash % (sizeof(*salt->bitmap) * 8)))))
 			return 0;

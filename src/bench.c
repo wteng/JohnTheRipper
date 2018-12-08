@@ -431,7 +431,13 @@ char *benchmark_format(struct fmt_main *format, int salts,
 	if (format->params.binary_size > binary_size) {
 		binary_size = format->params.binary_size;
 		binary = mem_alloc_tiny(binary_size, MEM_ALIGN_SIMD);
-		memset(binary, 0x55, binary_size);
+		if (format->params.flags & FMT_BLOB) {
+			/* For this case we'd ideally use two_binaries[2] */
+			memcpy(binary,
+			       format->methods.binary(format->params.tests[0].ciphertext),
+			       binary_size);
+		} else
+			memset(binary, 0x55, binary_size);
 	}
 
 	for (index = 0; index < 2; index++) {

@@ -118,6 +118,8 @@ struct db_salt;
 #define FMT_OMP				0
 #define FMT_OMP_BAD			0
 #endif
+/* Non-hash format. If used, binary_size must be 0 */
+#define FMT_BLOB			0x04000000
 /* We've already warned the user about hashes of this type being present */
 #define FMT_WARNED			0x80000000
 
@@ -131,6 +133,28 @@ struct fmt_tests {
 	char *ciphertext, *plaintext;
 	char *fields[10];
 };
+
+/*
+ * Flags for fmt_data.
+ */
+/* Blob portion is tiny-alloc. */
+#define FMT_DATA_TINY			0x00000001
+/* Blob portion is malloc, so needs to be freed when done with it. */
+#define FMT_DATA_ALLOC			0x00000002
+
+/*
+ * Variable size data for non-hashes (formerly stored in "salt").
+ * "size" is the size of blob only. Size of data returned is always
+ * just sizeof(fmt_data). The blob is either mem_alloc_tiny and flag
+ * is FMT_DATA_TINY, or alloced and flag is FMT_DATA_ALLOC.
+ * The latter needs free when we're done with it. Regardless, the
+ * loader never copies it. The cracker uses the pointer (and may free it).
+ */
+typedef struct {
+	unsigned int flags;
+	size_t size;
+	void *blob;
+} fmt_data;
 
 /*
  * Parameters of a hash function and its cracking algorithm.
@@ -246,6 +270,7 @@ struct fmt_methods {
 	char *(*split)(char *ciphertext, int index, struct fmt_main *self);
 
 /* Converts an ASCII ciphertext to binary, possibly using the salt */
+/* Or, converts an ASCII non-hash data blob to a fmt_data struct */
 	void *(*binary)(char *ciphertext);
 
 /* Converts an ASCII salt to its internal representation */
@@ -407,6 +432,13 @@ extern void fmt_all_done(void);
  * success, method name on error.
  */
 extern char *fmt_self_test(struct fmt_main *format, struct db_main *db);
+
+/*
+ * Compare the real binary, whatever it is:
+ * If this is not FMT_BLOB we do a plain memcmp. If it is, we
+ * memcmp the pointed-to binaries, with correct sizes.
+ */
+extern int fmt_bincmp(void *b1, void *b2, struct fmt_main *format);
 
 /*
  * Default methods.

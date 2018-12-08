@@ -890,6 +890,16 @@ static struct list_main *ldr_init_words(char *login, char *gecos, char *home)
 	return words;
 }
 
+#define BLOB_BINARY(b) ((format->params.flags & FMT_BLOB) ?	\
+                        (((fmt_data*)(b))->blob) : (b))
+
+#define BLOB_SIZE(b) ((format->params.flags & FMT_BLOB) ?	  \
+                      (((fmt_data*)(b))->size) : (format->params.binary_size))
+
+#define BLOB_FREE(b) do { if ((b) && (format->params.flags & FMT_BLOB) && \
+                              (((fmt_data*)(b))->flags & FMT_DATA_ALLOC)) \
+			MEM_FREE(((fmt_data*)(b))->blob); } while (0)
+
 #ifdef HAVE_FUZZ
 void ldr_load_pw_line(struct db_main *db, char *line)
 #else
@@ -901,7 +911,7 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 	int index, count;
 	char *login, *ciphertext, *gecos, *home, *uid;
 	char *piece;
-	void *binary, *salt;
+	void *binary = NULL, *salt;
 	int salt_hash, pw_hash;
 	struct db_salt *current_salt, *last_salt;
 	struct db_password *current_pw, *last_pw;
@@ -943,22 +953,23 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 	for (index = 0; index < count; index++) {
 		piece = format->methods.split(ciphertext, index, format);
 
+		BLOB_FREE(binary);
 		binary = format->methods.binary(piece);
 		pw_hash = db->password_hash_func(binary);
 
 		if (options.flags & FLG_REJECT_PRINTABLE) {
 			int i = 0;
 
-			while (isprint((int)((unsigned char*)binary)[i]) &&
-			       i < format->params.binary_size)
+			while (isprint((int)((unsigned char*)BLOB_BINARY(binary))[i]) &&
+			       i < BLOB_SIZE(binary))
 				i++;
 
-			if (i == format->params.binary_size) {
+			if (i == BLOB_SIZE(binary)) {
 				if (john_main_process)
 				fprintf(stderr, "rejecting printable binary"
 				        " \"%.*s\" (%s)\n",
-				        format->params.binary_size,
-				        (char*)binary, piece);
+				        (int)BLOB_SIZE(binary),
+				        (char*)BLOB_BINARY(binary), piece);
 				continue;
 			}
 		}
@@ -967,8 +978,7 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 			int collisions = 0;
 			if ((current_pw = db->password_hash[pw_hash]))
 			do {
-				if (!memcmp(binary, current_pw->binary,
-				    format->params.binary_size) &&
+				if (!fmt_bincmp(binary, current_pw->binary, format) &&
 				    !strcmp(piece, format->methods.source(
 				    current_pw->source, current_pw->binary))) {
 					db->options->flags |= DB_NODUP;
@@ -1102,6 +1112,7 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 				current_pw->login = str_alloc_copy(login);
 		}
 	}
+	BLOB_FREE(binary);
 }
 
 void ldr_load_pw_file(struct db_main *db, char *name)
@@ -1181,7 +1192,8 @@ static void ldr_load_pot_line(struct db_main *db, char *line)
 	struct db_password *current;
 
 	ciphertext = ldr_get_field(&line, db->options->field_sep_char);
-	if (ldr_trunc_valid(ciphertext, format) != 1) return;
+	if (ldr_trunc_valid(ciphertext, format) != 1)
+		return;
 	ciphertext = format->methods.split(ciphertext, 0, format);
 	binary = format->methods.binary(ciphertext);
 	hash = db->password_hash_func(binary);
@@ -1199,17 +1211,19 @@ static void ldr_load_pot_line(struct db_main *db, char *line)
 		 * can't treat with memcmp().
 		 */
 		if (hash || !ldr_isa_pot_source(ciphertext))
-		if (memcmp(binary, current->binary, format->params.binary_size))
+		if (fmt_bincmp(binary, current->binary, format))
 			continue;
 		if (ldr_pot_source_cmp(ciphertext,
 		    format->methods.source(current->source, current->binary)))
 			continue;
+		BLOB_FREE(current->binary);
 		current->binary = NULL; /* mark for removal */
 		need_removal = 1;
 	} while ((current = current->next_hash));
 
 	if (need_removal)
 		db->options->flags |= DB_NEED_REMOVAL;
+	BLOB_FREE(binary);
 }
 
 struct db_main *ldr_init_test_db(struct fmt_main *format, struct db_main *real)

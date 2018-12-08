@@ -1566,6 +1566,10 @@ static void* fill_opencl_device(size_t gws, void **binary)
 	return salt;
 }
 
+#define BLOB_FREE(b) do { if ((self->params.flags & FMT_BLOB) &&	  \
+                              (((fmt_data*)(b))->flags & FMT_DATA_ALLOC)) \
+			MEM_FREE(((fmt_data*)(b))->blob); } while (0)
+
 // Do a test run with a specific global work size, return total duration
 // (or return zero for error or limits exceeded)
 static cl_ulong gws_test(size_t gws, unsigned int rounds, int sequential_id)
@@ -1609,6 +1613,7 @@ static cl_ulong gws_test(size_t gws, unsigned int rounds, int sequential_id)
 		return 0;
 	}
 	self->methods.cmp_all(binary, result);
+	BLOB_FREE(binary);
 
 	for (i = 0; (*multi_profilingEvent[i]); i++)
 		number_of_events++;
@@ -1871,6 +1876,7 @@ void opencl_find_best_lws(size_t group_size_limit, int sequential_id,
 
 			clear_profiling_events();
 		}
+		BLOB_FREE(binary);
 
 		/* Erase the 'spinning wheel' cursor */
 		if (john_main_process && isatty(fileno(stderr)))

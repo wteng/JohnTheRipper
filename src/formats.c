@@ -327,6 +327,33 @@ static char* is_key_right(struct fmt_main *format, int index,
 }
 #endif
 
+#define BLOB_BINARY(b) ((format->params.flags & FMT_BLOB) ?	\
+                        (((fmt_data*)(b))->blob) : (b))
+
+#define BLOB_SIZE(b) ((format->params.flags & FMT_BLOB) ?	  \
+                      (((fmt_data*)(b))->size) : (format->params.binary_size))
+
+#define BLOB_FREE(b) do { if ((b) && (format->params.flags & FMT_BLOB) &&	  \
+                              (((fmt_data*)(b))->flags & FMT_DATA_ALLOC)) \
+			MEM_FREE(((fmt_data*)(b))->blob); } while (0)
+
+int fmt_bincmp(void *b1, void *b2, struct fmt_main *format)
+{
+	if (!(format->params.flags & FMT_BLOB))
+		return memcmp(b1, b2, format->params.binary_size);
+
+	size_t s1 = ((fmt_data*)b1)->size;
+	size_t s2 = ((fmt_data*)b2)->size;
+
+	if (s1 != s2)
+		return 1;
+
+	b1 = ((fmt_data*)b1)->blob;
+	b2 = ((fmt_data*)b2)->blob;
+
+	return memcmp(b1, b2, s1);
+}
+
 static char *fmt_self_test_body(struct fmt_main *format,
     void *binary_copy, void *salt_copy, struct db_main *db, int full_lvl)
 {
@@ -647,10 +674,12 @@ static char *fmt_self_test_body(struct fmt_main *format,
 
 		/* validate that binary() returns cleaned buffer */
 		if (extra_tests && !binary_cleaned_warned && format->params.binary_size) {
+			BLOB_FREE(binary);
 			memset(binary, 0xAF, format->params.binary_size);
 			binary = format->methods.binary(ciphertext);
 			if (((unsigned char*)binary)[format->params.binary_size-1] == 0xAF)
 			{
+				BLOB_FREE(binary);
 				memset(binary, 0xCC, format->params.binary_size);
 				binary = format->methods.binary(ciphertext);
 				if (((unsigned char*)binary)[format->params.binary_size-1] == 0xCC)
@@ -661,6 +690,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
 				}
 			}
 			/* Clean up the mess we might have caused */
+			BLOB_FREE(binary);
 			memset(binary, 0, format->params.binary_size);
 			binary = format->methods.binary(ciphertext);
 		}
@@ -1195,9 +1225,9 @@ static void test_fmt_split_unifies_case(struct fmt_main *format, char *ciphertex
 		ret = format->methods.split(ret, 0, format);
 		ret_copy = strdup(ret);
 		bin = format->methods.binary(ret_copy);
-		if (format->params.binary_size>4) {
-			bin_hex = mem_alloc(format->params.binary_size*2+1);
-			base64_convert(bin, e_b64_raw, format->params.binary_size, bin_hex, e_b64_hex, format->params.binary_size*2+1, 0, 0);
+		if (BLOB_SIZE(bin) > 4) {
+			bin_hex = mem_alloc(BLOB_SIZE(bin) * 2 + 1);
+			base64_convert(BLOB_BINARY(bin), e_b64_raw, BLOB_SIZE(bin), bin_hex, e_b64_hex, BLOB_SIZE(bin) * 2 + 1, 0, 0);
 			cp = strstr(ret_copy, bin_hex);
 			strupr(bin_hex);
 			if (cp) {
@@ -1219,6 +1249,7 @@ static void test_fmt_split_unifies_case(struct fmt_main *format, char *ciphertex
 			}
 			MEM_FREE(bin_hex);
 		}
+		BLOB_FREE(bin);
 		if (format->params.salt_size>4 && format->params.salt_size < strlen(ret_copy)-10) {
 			bin_hex = mem_alloc(format->params.salt_size*2+1);
 			bin = format->methods.salt(ret_copy);
@@ -1357,18 +1388,18 @@ static void test_fmt_split_unifies_case_3(struct fmt_main *format,
 	orig_salt = NULL;
 
 	binary = format->methods.binary(split_ret);
-	if (binary != NULL) {
-
-		orig_binary = mem_alloc(format->params.binary_size);
-		memcpy(orig_binary, binary, format->params.binary_size);
+	if (binary) {
+		orig_binary = mem_alloc(BLOB_SIZE(binary));
+		memcpy(orig_binary, BLOB_BINARY(binary), BLOB_SIZE(binary));
 
 		salt = format->methods.salt(split_ret);
 		dyna_salt_create(salt);
-		if (salt != NULL && format->params.salt_size) {
+		if (salt && format->params.salt_size) {
 			orig_salt = mem_alloc(format->params.salt_size);
 			memcpy(orig_salt, salt, format->params.salt_size);
 		}
 		dyna_salt_remove(salt);
+		BLOB_FREE(binary);
 	}
 
 /*
@@ -1400,11 +1431,11 @@ static void test_fmt_split_unifies_case_3(struct fmt_main *format,
 				*is_need_unify_case = 0;
 			binary = format->methods.binary(split_ret);
 
-			if (binary != NULL)
-			if (memcmp(orig_binary, binary, format->params.binary_size) != 0) {
+			if (binary && fmt_bincmp(orig_binary, binary, format)) {
 				// Do not need to unify cases in split() and add
 				// FMT_SPLIT_UNIFIES_CASE
 				*is_need_unify_case = 0;
+				BLOB_FREE(binary);
 			}
 		} else
 			*is_need_unify_case = 0;
@@ -1422,11 +1453,11 @@ static void test_fmt_split_unifies_case_3(struct fmt_main *format,
 				*is_need_unify_case = 0;
 			binary = format->methods.binary(split_ret);
 
-			if (binary != NULL)
-			if (memcmp(orig_binary, binary, format->params.binary_size) != 0) {
+			if (binary && fmt_bincmp(orig_binary, binary, format)) {
 				// Do not need to unify cases in split() and add
 				// FMT_SPLIT_UNIFIES_CASE
 				*is_need_unify_case = 0;
+				BLOB_FREE(binary);
 			}
 		} else
 			*is_need_unify_case = 0;
@@ -1590,6 +1621,7 @@ char *fmt_self_test(struct fmt_main *format, struct db_main *db)
 	self_test_running = 0;
 
 	MEM_FREE(salt_alloc);
+	BLOB_FREE(binary_alloc);
 	MEM_FREE(binary_alloc);
 
 	return retval;
