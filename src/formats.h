@@ -118,7 +118,7 @@ struct db_salt;
 #define FMT_OMP				0
 #define FMT_OMP_BAD			0
 #endif
-/* Non-hash format. If used, binary_size must be 0 */
+/* Non-hash format. If used, binary_size must be sizeof(fmt_data) */
 #define FMT_BLOB			0x04000000
 /* We've already warned the user about hashes of this type being present */
 #define FMT_WARNED			0x80000000
@@ -148,7 +148,8 @@ struct fmt_tests {
  * just sizeof(fmt_data). The blob is either mem_alloc_tiny and flag
  * is FMT_DATA_TINY, or alloced and flag is FMT_DATA_ALLOC.
  * The latter needs free when we're done with it. Regardless, the
- * loader never copies it. The cracker uses the pointer (and may free it).
+ * loader never copies it - just this struct. The cracker uses the
+ * pointer and size (and frees the pointer when appropriate).
  */
 typedef struct {
 	unsigned int flags;
