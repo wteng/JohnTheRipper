@@ -374,8 +374,7 @@ static int crk_process_guess(struct db_salt *salt, struct db_password *pw,
 	int dupe;
 	char *key, *utf8key, *repkey, *replogin, *repuid;
 
-	if (index >= 0 && index < crk_params->max_keys_per_crypt &&
-		!(crk_params->flags & FMT_BLOB)) {
+	if (index >= 0 && index < crk_params->max_keys_per_crypt) {
 		dupe = crk_timestamps[index] == status.crypts;
 		crk_timestamps[index] = status.crypts;
 	} else
@@ -444,7 +443,7 @@ static int crk_process_guess(struct db_salt *salt, struct db_password *pw,
 			john_max_cands = status.cands - options.max_cands +
 				crk_params->max_keys_per_crypt;
 
-		if (dupe)
+		if (dupe && !(crk_params->flags & FMT_BLOB))
 			ct = NULL;
 		else
 			ct = ldr_pot_source(
