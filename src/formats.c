@@ -1621,7 +1621,7 @@ char *fmt_self_test(struct fmt_main *format, struct db_main *db)
 	self_test_running = 0;
 
 	MEM_FREE(salt_alloc);
-	BLOB_FREE(binary_alloc);
+	//BLOB_FREE(binary_alloc);
 	MEM_FREE(binary_alloc);
 
 	return retval;
